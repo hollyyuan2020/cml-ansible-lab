@@ -1,0 +1,53 @@
+---
+- name: Test Connectivity and Add Loopback to Routers
+  hosts: routers
+  gather_facts: no
+  tasks:
+    - name: Test connection and show version
+      ios_command:
+        commands: show version
+      register: version_output
+
+    - name: Display version summary
+      debug:
+        msg: "Router {{ inventory_hostname }} version: {{ version_output.stdout_lines[0] }}"
+
+    - name: Check if Loopback0 has IP config
+      ios_command:
+        commands: show running-config interface Loopback0 | include ip address
+      register: lo0_ip_check
+      changed_when: false
+
+    - name: Delete existing Loopback0 config if IP present
+      ios_config:
+        lines:
+          - no interface Loopback0
+        save_when: modified
+      when: lo0_ip_check.stdout != ""  # <-- Now at task level -- CORRECT!
+      register: lo0_delete
+
+    - name: Report deletion
+      debug:
+        msg: "Loopback0 deleted on {{ inventory_hostname }}: {{ lo0_delete.changed }}"
+      when: lo0_delete is defined and lo0_delete.changed
+
+    - name: Configure Loopback0 with unique IP (/32 mask)
+      ios_config:
+        lines:
+          - interface Loopback0
+          - ip address {{ loopback_ip }} 255.255.255.255
+          - no shutdown
+        save_when: modified
+      register: loopback_config
+
+    - name: Report changes
+      debug:
+        msg: "Loopback configured on {{ inventory_hostname }}: {{ loopback_config.changed }}"
+
+    - name: Enable OSPF
+      ios_config:
+        lines:
+          - router ospf 1
+          - network 10.0.0.0 0.0.0.255 area 0
+          - network 192.168.100.0 0.0.0.255 area 0
+        save_when: modified
